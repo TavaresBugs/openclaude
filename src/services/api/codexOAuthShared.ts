@@ -1,3 +1,7 @@
+import { homedir } from 'os'
+import { join } from 'path'
+import type { OAuthConfig } from '../oauth/types.js'
+
 export const CODEX_OAUTH_ISSUER = 'https://auth.openai.com'
 export const CODEX_REFRESH_URL = `${CODEX_OAUTH_ISSUER}/oauth/token`
 export const DEFAULT_CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -54,6 +58,71 @@ export function getCodexOAuthTimeoutMs(
   }
 
   return DEFAULT_CODEX_OAUTH_TIMEOUT_MS
+}
+
+export function getCodexOAuthConfig(): OAuthConfig {
+  return {
+    providerId: 'codex',
+    displayName: 'OpenAI Codex',
+    clientId: getCodexOAuthClientId(),
+    authorizationUrl: `${CODEX_OAUTH_ISSUER}/oauth/authorize`,
+    tokenUrl: CODEX_REFRESH_URL,
+    callbackPath: '/auth/callback',
+    callbackPort: getCodexOAuthCallbackPort(),
+    fallbackPorts: [1456, 1457, 1458],
+    timeoutMs: getCodexOAuthTimeoutMs(),
+    scopes: CODEX_OAUTH_SCOPE.split(' '),
+    credentialsPath: join(homedir(), '.codex', 'auth.json'),
+    flow: 'pkce',
+    defaultBaseUrl: 'https://chatgpt.com/backend-api/codex',
+    apiKeyBaseUrl: 'https://chatgpt.com/backend-api/codex',
+  }
+}
+
+export const GEMINI_OAUTH_CONFIG: OAuthConfig = {
+  providerId: 'gemini',
+  displayName: 'Google Gemini',
+  clientId: process.env.GEMINI_OAUTH_CLIENT_ID ?? '',
+  clientSecret: process.env.GEMINI_OAUTH_CLIENT_SECRET,
+  authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenUrl: 'https://oauth2.googleapis.com/token',
+  callbackPath: '/auth/callback',
+  callbackPort: 1456,
+  fallbackPorts: [1457, 1458, 1459],
+  timeoutMs: 10 * 60 * 1000,
+  scopes: ['https://www.googleapis.com/auth/generative-language'],
+  credentialsPath: join(homedir(), '.openclaude', 'gemini-auth.json'),
+  flow: 'pkce',
+  defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  apiKeyBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+}
+
+export const DASHSCOPE_CN_OAUTH_CONFIG: OAuthConfig = {
+  providerId: 'dashscope-cn',
+  displayName: 'Alibaba Qwen (China)',
+  clientId: process.env.DASHSCOPE_OAUTH_CLIENT_ID ?? '',
+  authorizationUrl: 'https://signin.aliyun.com/oauth2/v1/device/authorize',
+  tokenUrl: 'https://oauth.aliyun.com/v1/token',
+  callbackPath: '/auth/callback',
+  callbackPort: 1457,
+  fallbackPorts: [1458, 1459],
+  timeoutMs: 10 * 60 * 1000,
+  scopes: ['cloud:llm:read', 'cloud:llm:write'],
+  credentialsPath: join(homedir(), '.openclaude', 'dashscope-auth.json'),
+  flow: 'device',
+  defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  apiKeyBaseUrl: 'https://coding.dashscope.aliyuncs.com/v1',
+}
+
+export const DASHSCOPE_INTL_OAUTH_CONFIG: OAuthConfig = {
+  ...DASHSCOPE_CN_OAUTH_CONFIG,
+  providerId: 'dashscope-intl',
+  displayName: 'Alibaba Qwen (International)',
+  authorizationUrl: 'https://signin.alibabacloud.com/oauth2/v1/device/authorize',
+  tokenUrl: 'https://oauth.alibabacloud.com/v1/token',
+  credentialsPath: join(homedir(), '.openclaude', 'dashscope-intl-auth.json'),
+  defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  apiKeyBaseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
 }
 
 export function decodeJwtPayload(

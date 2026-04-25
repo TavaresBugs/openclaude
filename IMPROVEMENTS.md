@@ -113,9 +113,10 @@ src/commands/model/model.tsx           — integração ProviderModelSwitcher
 
 ## 3. Problemas identificados
 
-### P1 — Inconsistência de ModelSource
-DeepSeek, NIM, MiniMax, Bankr, Moonshot, GLM têm modelos hard-coded como string no `model` field.
-Providers como Together e Groq fazem fetch real via `/models`. Sem declaração explícita de qual estratégia.
+### ~~P1 — Inconsistência de ModelSource~~ ✅ RESOLVIDO
+`modelSource`, `authMethod`, `staticModels[]`, `docsUrl` adicionados a todos os 21 presets.
+`providerRegistry` pula fetch para providers estáticos. DeepSeek fix: string solta → `staticModels`.
+> commit `5d61739`
 
 ### P2 — OAuth não é extensível
 Flow OAuth acoplado 100% ao Codex. Gemini e Dashscope têm OAuth disponível mas sem infraestrutura para reaproveitar o padrão.
@@ -146,13 +147,13 @@ Sem env var para controlar. Usuários com APIs lentas ou redes instáveis não t
 ### Fase 1 — Fundação do sistema de providers
 > Objetivo: Tornar o sistema de providers declarativo e consistente.
 
-- [ ] **1.1** Adicionar `modelSource: 'static' | 'openai-models-api'` como campo obrigatório em `ProviderPresetDefaults`
-- [ ] **1.2** Adicionar `authMethod: 'api-key' | 'oauth' | 'none'` como campo obrigatório
-- [ ] **1.3** Adicionar `staticModels?: string[]` para providers com lista fixa
-- [ ] **1.4** Adicionar `docsUrl: string` para link à documentação oficial de cada provider
-- [ ] **1.5** Migrar DeepSeek para `staticModels: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner']`
-- [ ] **1.6** Migrar NIM, MiniMax, Bankr, Dashscope, Moonshot, GLM para `modelSource: 'static'` com `staticModels`
-- [ ] **1.7** Garantir que `providerRegistry` usa `modelSource` para decidir fetch vs lista estática
+- [x] **1.1** Adicionar `modelSource: 'static' | 'openai-models-api'` como campo obrigatório em `ProviderPresetDefaults`
+- [x] **1.2** Adicionar `authMethod: 'api-key' | 'oauth' | 'none'` como campo obrigatório
+- [x] **1.3** Adicionar `staticModels?: string[]` para providers com lista fixa
+- [x] **1.4** Adicionar `docsUrl: string` para link à documentação oficial de cada provider
+- [x] **1.5** Migrar DeepSeek para `staticModels: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner']`
+- [x] **1.6** Migrar NIM, MiniMax, Bankr, Dashscope, Moonshot, GLM para `modelSource: 'static'` com `staticModels`
+- [x] **1.7** Garantir que `providerRegistry` usa `modelSource` para decidir fetch vs lista estática
 - [ ] **1.8** Adicionar GLM ao `/provider` UI e ao `ProviderManager` (preset já existe em `providerProfiles.ts`)
 
 ### Fase 2 — OAuth genérico (Gemini + Dashscope)
