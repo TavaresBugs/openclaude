@@ -13,8 +13,9 @@ import {
   getProviderProfiles,
   getActiveProviderProfile,
   applyProviderProfileToProcessEnv,
-  type ProviderProfile,
+  getStaticModelsForBaseUrl,
 } from './providerProfiles.js'
+import type { ProviderProfile } from './config.js'
 import { resolveCodexApiCredentials } from '../services/api/providerConfig.js'
 
 type CacheRefreshListener = () => void
@@ -219,13 +220,17 @@ function writeCache(store: CacheStore): void {
 async function fetchModelsForProfile(
   profile: ProviderProfile,
 ): Promise<ProviderModelOption[]> {
+  const staticModels = getStaticModelsForBaseUrl(profile.baseUrl)
+  if (staticModels) {
+    return staticModels.map(id => ({ value: id, label: id, description: '' }))
+  }
+
   const key = cacheKey(profile.baseUrl, profile.apiKey)
   const store = readCache()
   const cached = store[key]
   const now = Date.now()
 
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
-    // refresh in background after returning cached result
     void fetchModelsForProvider({ baseUrl: profile.baseUrl, apiKey: profile.apiKey })
       .then(fresh => {
         if (fresh.length > 0) {

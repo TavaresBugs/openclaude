@@ -50,9 +50,16 @@ export type ProviderProfileInput = {
   apiKey?: string
 }
 
+export type ModelSource = 'static' | 'openai-models-api'
+export type AuthMethod = 'api-key' | 'oauth' | 'none'
+
 export type ProviderPresetDefaults = Omit<ProviderProfileInput, 'provider'> & {
   provider: ProviderProfile['provider']
   requiresApiKey: boolean
+  modelSource: ModelSource
+  authMethod: AuthMethod
+  staticModels?: readonly string[]
+  docsUrl: string
 }
 
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434/v1'
@@ -154,6 +161,10 @@ export function getProviderPresetDefaults(
         model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
         apiKey: process.env.ANTHROPIC_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+        docsUrl: 'https://docs.anthropic.com/en/api/getting-started',
       }
     case 'openai':
       return {
@@ -163,15 +174,29 @@ export function getProviderPresetDefaults(
         model: 'gpt-5.4',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: 'https://platform.openai.com/docs/overview',
       }
     case 'codex':
       return {
         provider: 'openai',
-        name: 'Codex',
+        name: 'OpenAI Codex',
         baseUrl: 'https://chatgpt.com/backend-api/codex',
         model: 'codexplan',
         apiKey: process.env.CODEX_API_KEY ?? '',
         requiresApiKey: false,
+        modelSource: 'static',
+        authMethod: 'oauth',
+        staticModels: [
+          'codexplan',
+          'codexspark',
+          'gpt-5.3-codex',
+          'gpt-5.2-codex',
+          'gpt-5.1-codex-max',
+          'gpt-5.1-codex-mini',
+        ],
+        docsUrl: 'https://platform.openai.com/docs/codex',
       }
     case 'moonshotai':
       return {
@@ -181,15 +206,23 @@ export function getProviderPresetDefaults(
         model: 'kimi-k2.5',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['kimi-k2.5', 'kimi-k2.6', 'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+        docsUrl: 'https://platform.moonshot.ai/docs',
       }
     case 'deepseek':
       return {
         provider: 'openai',
         name: 'DeepSeek',
         baseUrl: 'https://api.deepseek.com/v1',
-        model: 'deepseek-v4-flash, deepseek-v4-pro, deepseek-chat, deepseek-reasoner',
+        model: 'deepseek-v4-flash',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
+        docsUrl: 'https://api-docs.deepseek.com',
       }
     case 'gemini':
       return {
@@ -199,6 +232,15 @@ export function getProviderPresetDefaults(
         model: 'gemini-3-flash-preview',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: [
+          'gemini-3-flash-preview',
+          'gemini-2.5-pro',
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+        ],
+        docsUrl: 'https://ai.google.dev/gemini-api/docs',
       }
     case 'mistral':
       return {
@@ -207,7 +249,10 @@ export function getProviderPresetDefaults(
         baseUrl: 'https://api.mistral.ai/v1',
         model: 'devstral-latest',
         apiKey: '',
-        requiresApiKey: true
+        requiresApiKey: true,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: 'https://docs.mistral.ai',
       }
     case 'together':
       return {
@@ -217,6 +262,9 @@ export function getProviderPresetDefaults(
         model: 'Qwen/Qwen3.5-9B',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: 'https://docs.together.ai',
       }
     case 'groq':
       return {
@@ -226,6 +274,9 @@ export function getProviderPresetDefaults(
         model: 'llama-3.3-70b-versatile',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: 'https://console.groq.com/docs',
       }
     case 'azure-openai':
       return {
@@ -235,6 +286,9 @@ export function getProviderPresetDefaults(
         model: 'YOUR-DEPLOYMENT-NAME',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: 'https://learn.microsoft.com/azure/ai-services/openai',
       }
     case 'openrouter':
       return {
@@ -244,6 +298,9 @@ export function getProviderPresetDefaults(
         model: 'openai/gpt-5-mini',
         apiKey: '',
         requiresApiKey: true,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: 'https://openrouter.ai/docs',
       }
     case 'lmstudio':
       return {
@@ -253,24 +310,35 @@ export function getProviderPresetDefaults(
         model: 'local-model',
         apiKey: '',
         requiresApiKey: false,
+        modelSource: 'openai-models-api',
+        authMethod: 'none',
+        docsUrl: 'https://lmstudio.ai/docs',
       }
     case 'dashscope-cn':
       return {
         provider: 'openai',
-        name: 'Alibaba Coding Plan (China)',
+        name: 'Alibaba Qwen (China)',
         baseUrl: 'https://coding.dashscope.aliyuncs.com/v1',
         model: 'qwen3.6-plus',
         apiKey: process.env.DASHSCOPE_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['qwen3.6-plus', 'qwen3.6-turbo', 'qwen-max', 'qwen-plus', 'qwen-turbo'],
+        docsUrl: 'https://help.aliyun.com/zh/model-studio',
       }
     case 'dashscope-intl':
       return {
         provider: 'openai',
-        name: 'Alibaba Coding Plan',
+        name: 'Alibaba Qwen (International)',
         baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
         model: 'qwen3.6-plus',
         apiKey: process.env.DASHSCOPE_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['qwen3.6-plus', 'qwen3.6-turbo', 'qwen-max', 'qwen-plus', 'qwen-turbo'],
+        docsUrl: 'https://www.alibabacloud.com/help/en/model-studio',
       }
     case 'glm':
       return {
@@ -280,6 +348,10 @@ export function getProviderPresetDefaults(
         model: 'glm-4.5-flash',
         apiKey: process.env.ZHIPUAI_API_KEY ?? process.env.GLM_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-flash', 'glm-4.5-air'],
+        docsUrl: 'https://open.bigmodel.cn/dev/howuse/model',
       }
     case 'custom':
       return {
@@ -292,6 +364,9 @@ export function getProviderPresetDefaults(
         model: process.env.OPENAI_MODEL ?? DEFAULT_OLLAMA_MODEL,
         apiKey: process.env.OPENAI_API_KEY ?? '',
         requiresApiKey: false,
+        modelSource: 'openai-models-api',
+        authMethod: 'api-key',
+        docsUrl: '',
       }
     case 'nvidia-nim':
       return {
@@ -301,6 +376,15 @@ export function getProviderPresetDefaults(
         model: 'nvidia/llama-3.1-nemotron-70b-instruct',
         apiKey: process.env.NVIDIA_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: [
+          'nvidia/llama-3.1-nemotron-70b-instruct',
+          'nvidia/llama-3.3-nemotron-super-49b-v1',
+          'meta/llama-3.1-70b-instruct',
+          'meta/llama-3.1-405b-instruct',
+        ],
+        docsUrl: 'https://docs.api.nvidia.com/nim',
       }
     case 'minimax':
       return {
@@ -310,6 +394,10 @@ export function getProviderPresetDefaults(
         model: 'MiniMax-M2.5',
         apiKey: process.env.MINIMAX_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['MiniMax-M2.5', 'MiniMax-M1', 'MiniMax-Text-01'],
+        docsUrl: 'https://www.minimaxi.com/document/introduction',
       }
     case 'atomic-chat':
       return {
@@ -319,6 +407,9 @@ export function getProviderPresetDefaults(
         model: process.env.OPENAI_MODEL ?? 'local-model',
         apiKey: '',
         requiresApiKey: false,
+        modelSource: 'openai-models-api',
+        authMethod: 'none',
+        docsUrl: 'https://atomicchat.ai',
       }
     case 'bankr':
       return {
@@ -328,6 +419,10 @@ export function getProviderPresetDefaults(
         model: process.env.BANKR_MODEL ?? 'claude-opus-4.6',
         apiKey: process.env.BNKR_API_KEY ?? '',
         requiresApiKey: true,
+        modelSource: 'static',
+        authMethod: 'api-key',
+        staticModels: ['claude-opus-4.6', 'claude-sonnet-4-6', 'gpt-5.4'],
+        docsUrl: 'https://bankr.bot',
       }
     case 'ollama':
     default:
@@ -338,8 +433,28 @@ export function getProviderPresetDefaults(
         model: process.env.OPENAI_MODEL ?? DEFAULT_OLLAMA_MODEL,
         apiKey: '',
         requiresApiKey: false,
+        modelSource: 'openai-models-api',
+        authMethod: 'none',
+        docsUrl: 'https://ollama.com/library',
       }
   }
+}
+
+const ALL_PRESETS: ProviderPreset[] = [
+  'anthropic', 'openai', 'codex', 'moonshotai', 'deepseek', 'gemini', 'mistral',
+  'together', 'groq', 'azure-openai', 'openrouter', 'lmstudio', 'dashscope-cn',
+  'dashscope-intl', 'glm', 'custom', 'nvidia-nim', 'minimax', 'atomic-chat', 'bankr', 'ollama',
+]
+
+const STATIC_MODELS_BY_BASE_URL: Map<string, readonly string[]> = new Map(
+  ALL_PRESETS
+    .map(p => getProviderPresetDefaults(p))
+    .filter(d => d.modelSource === 'static' && d.staticModels)
+    .map(d => [d.baseUrl.replace(/\/+$/, ''), d.staticModels!]),
+)
+
+export function getStaticModelsForBaseUrl(baseUrl: string): readonly string[] | null {
+  return STATIC_MODELS_BY_BASE_URL.get(baseUrl.replace(/\/+$/, '')) ?? null
 }
 
 export function getProviderProfiles(
@@ -502,7 +617,7 @@ function isProcessEnvAlignedWithProfile(
     )
   }
 
-  if (profile.provider === 'codex' || isCodexBaseUrl(profile.baseUrl)) {
+  if (isCodexBaseUrl(profile.baseUrl)) {
     return (
       processEnv.CLAUDE_CODE_USE_OPENAI !== undefined &&
       processEnv.CLAUDE_CODE_USE_GEMINI === undefined &&
@@ -656,7 +771,7 @@ export function applyProviderProfileToProcessEnv(profile: ProviderProfile): void
   process.env.OPENAI_BASE_URL = profile.baseUrl
   process.env.OPENAI_MODEL = getPrimaryModel(profile.model)
 
-  if (profile.provider === 'codex' || isCodexBaseUrl(profile.baseUrl)) {
+  if (isCodexBaseUrl(profile.baseUrl)) {
     const credentials = readCodexCredentials()
     const accountId = credentials?.accountId
     if (profile.apiKey) {
@@ -672,7 +787,7 @@ export function applyProviderProfileToProcessEnv(profile: ProviderProfile): void
     }
   }
 
-  if (profile.apiKey && !(profile.provider === 'codex' || isCodexBaseUrl(profile.baseUrl))) {
+  if (profile.apiKey && !(isCodexBaseUrl(profile.baseUrl))) {
     process.env.OPENAI_API_KEY = profile.apiKey
     // Also set provider-specific API keys for detection
     const baseUrl = profile.baseUrl.toLowerCase()
