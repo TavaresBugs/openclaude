@@ -118,8 +118,11 @@ src/commands/model/model.tsx           — integração ProviderModelSwitcher
 `providerRegistry` pula fetch para providers estáticos. DeepSeek fix: string solta → `staticModels`.
 > commit `5d61739`
 
-### P2 — OAuth não é extensível
-Flow OAuth acoplado 100% ao Codex. Gemini e Dashscope têm OAuth disponível mas sem infraestrutura para reaproveitar o padrão.
+### ~~P2 — OAuth não é extensível~~ ✅ RESOLVIDO (infraestrutura)
+`OAuthConfig` interface criada. `ProviderOAuthService` (PKCE) + device flow (RFC 8628) genéricos.
+`GEMINI_OAUTH_CONFIG`, `DASHSCOPE_CN/INTL_OAUTH_CONFIG` declarados. `useProviderOAuthFlow` hook genérico.
+UI no ProviderManager (Gemini + Dashscope) pendente — Fase 7 UX.
+> commit `7379b7f`
 
 ### P3 — Sem versionamento dos perfis salvos
 `~/.openclaude.json` não tem `version`. Mudanças de schema corrompem perfis existentes silenciosamente.
@@ -159,7 +162,7 @@ Sem env var para controlar. Usuários com APIs lentas ou redes instáveis não t
 ### Fase 2 — OAuth genérico (Gemini + Dashscope)
 > Objetivo: Reaproveitar infraestrutura OAuth do Codex para Gemini e Dashscope.
 
-- [ ] **2.1** Criar `src/services/oauth/types.ts` com interface `OAuthConfig`:
+- [x] **2.1** Criar `src/services/oauth/types.ts` com interface `OAuthConfig`:
   ```typescript
   interface OAuthConfig {
     providerId: string
@@ -175,26 +178,17 @@ Sem env var para controlar. Usuários com APIs lentas ou redes instáveis não t
     defaultBaseUrl: string          // endpoint aplicado automaticamente ao ativar OAuth
   }
   ```
-- [ ] **2.2** Mover config Codex para `CODEX_OAUTH_CONFIG: OAuthConfig` usando o novo tipo
-- [ ] **2.3** Refatorar `useCodexOAuthFlow.ts` → `useProviderOAuthFlow.ts` que aceita `OAuthConfig`
-- [ ] **2.4** Implementar `GEMINI_OAUTH_CONFIG` (Authorization Code + PKCE, Google endpoints)
-  - Authorization URL: `https://accounts.google.com/o/oauth2/v2/auth`
-  - Token URL: `https://oauth2.googleapis.com/token`
-  - Scope: `https://www.googleapis.com/auth/generative-language`
-  - Credenciais: `~/.openclaude/gemini-auth.json`
-- [ ] **2.5** Implementar `DASHSCOPE_OAUTH_CONFIG` (Device Authorization Grant, RFC 8628)
-  - Device URL: `https://signin.aliyun.com/oauth2/v1/device/authorize`
-  - Token URL: `https://oauth.aliyun.com/v1/token`
-  - Scope: `cloud:llm:read cloud:llm:write`
-  - Credenciais: `~/.openclaude/dashscope-auth.json`
-  - Fluxo: polling de token até aprovação no browser
-- [ ] **2.6** Adicionar UI de OAuth no `ProviderManager` para Gemini (igual ao Codex)
-- [ ] **2.7** Adicionar UI de OAuth no `ProviderManager` para Dashscope (Device Flow = mostrar código para usuário)
-- [ ] **2.8** Ao trocar API Key → OAuth no `ProviderManager`: aplicar `OAuthConfig.defaultBaseUrl` automaticamente no perfil
-- [ ] **2.9** Ao trocar OAuth → API Key: restaurar o `baseUrl` padrão de API Key do preset
-- [ ] **2.10** Mover `client_id` Codex para env var `CODEX_OAUTH_CLIENT_ID` com fallback
-- [ ] **2.11** Implementar fallback de porta: testar 1455 → 1456 → 1457 antes de falhar
-- [ ] **2.12** Testar flow Codex sem regressão após refatoração
+- [x] **2.2** Mover config Codex para `getCodexOAuthConfig(): OAuthConfig` em `codexOAuthShared.ts`
+- [x] **2.3** Criar `useProviderOAuthFlow.ts` — hook genérico aceita qualquer `OAuthConfig` (PKCE)
+- [x] **2.4** Implementar `GEMINI_OAUTH_CONFIG` (PKCE Google, `~/.openclaude/gemini-auth.json`)
+- [x] **2.5** Implementar `DASHSCOPE_CN/INTL_OAUTH_CONFIG` (Device Flow RFC 8628)
+- [ ] **2.6** UI no `ProviderManager` para Gemini OAuth (usa `useProviderOAuthFlow`)
+- [ ] **2.7** UI no `ProviderManager` para Dashscope Device Flow (mostra `user_code` + `verification_uri`)
+- [ ] **2.8** Ao trocar API Key → OAuth: aplicar `OAuthConfig.defaultBaseUrl` no perfil automaticamente
+- [ ] **2.9** Ao trocar OAuth → API Key: restaurar `apiKeyBaseUrl` do preset
+- [x] **2.10** `client_id` Codex via env var `CODEX_OAUTH_CLIENT_ID` (já existia em `codexOAuthShared.ts`)
+- [x] **2.11** Port fallback: `ProviderOAuthService.startPKCEFlow` tenta `callbackPort` + `fallbackPorts[]`
+- [ ] **2.12** Testes: Codex OAuth sem regressão após refatoração
 
 ### Fase 3 — Persistência versionada
 > Objetivo: Perfis salvos sobrevivem a mudanças de schema sem corromper dados.
