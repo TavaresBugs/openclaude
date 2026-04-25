@@ -1,15 +1,17 @@
 import { randomBytes } from 'crypto'
-import { isCodexBaseUrl } from '../services/api/providerConfig.js'
+import { DEFAULT_CODEX_BASE_URL, isCodexBaseUrl } from '../services/api/providerConfig.js'
 import {
   getGlobalConfig,
   saveGlobalConfig,
   type ProviderProfile,
 } from './config.js'
+import { readCodexCredentials } from './codexCredentials.js'
 import type { ModelOption } from './model/modelOptions.js'
 import { getPrimaryModel, parseModelList } from './providerModels.js'
 import {
   createProfileFile,
   saveProfileFile,
+  buildCodexOAuthProfileEnv,
   buildGeminiProfileEnv,
   buildMistralProfileEnv,
   buildOpenAIProfileEnv,
@@ -19,6 +21,7 @@ import {
 
 export type ProviderPreset =
   | 'anthropic'
+  | 'codex'
   | 'ollama'
   | 'openai'
   | 'moonshotai'
@@ -32,6 +35,7 @@ export type ProviderPreset =
   | 'lmstudio'
   | 'dashscope-cn'
   | 'dashscope-intl'
+  | 'glm'
   | 'custom'
   | 'nvidia-nim'
   | 'minimax'
@@ -160,6 +164,15 @@ export function getProviderPresetDefaults(
         apiKey: '',
         requiresApiKey: true,
       }
+    case 'codex':
+      return {
+        provider: 'openai',
+        name: 'Codex',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        model: 'codexplan',
+        apiKey: process.env.CODEX_API_KEY ?? '',
+        requiresApiKey: false,
+      }
     case 'moonshotai':
       return {
         provider: 'openai',
@@ -257,6 +270,15 @@ export function getProviderPresetDefaults(
         baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
         model: 'qwen3.6-plus',
         apiKey: process.env.DASHSCOPE_API_KEY ?? '',
+        requiresApiKey: true,
+      }
+    case 'glm':
+      return {
+        provider: 'openai',
+        name: 'Zhipu AI (GLM)',
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        model: 'glm-4.5-flash',
+        apiKey: process.env.ZHIPUAI_API_KEY ?? process.env.GLM_API_KEY ?? '',
         requiresApiKey: true,
       }
     case 'custom':
@@ -401,7 +423,7 @@ function hasConflictingProviderFlagsForProfile(
   profile: ProviderProfile,
 ): boolean {
   if (profile.provider === 'anthropic') {
-    return hasProviderSelectionFlags(processEnv)
+    return hasCompleteProviderSelection(processEnv)
   }
 
   return (
@@ -480,6 +502,22 @@ function isProcessEnvAlignedWithProfile(
     )
   }
 
+  if (profile.provider === 'codex' || isCodexBaseUrl(profile.baseUrl)) {
+    return (
+      processEnv.CLAUDE_CODE_USE_OPENAI !== undefined &&
+      processEnv.CLAUDE_CODE_USE_GEMINI === undefined &&
+      processEnv.CLAUDE_CODE_USE_MISTRAL === undefined &&
+      processEnv.CLAUDE_CODE_USE_GITHUB === undefined &&
+      processEnv.CLAUDE_CODE_USE_BEDROCK === undefined &&
+      processEnv.CLAUDE_CODE_USE_VERTEX === undefined &&
+      processEnv.CLAUDE_CODE_USE_FOUNDRY === undefined &&
+      sameOptionalEnvValue(processEnv.OPENAI_BASE_URL, profile.baseUrl) &&
+      sameOptionalEnvValue(processEnv.OPENAI_MODEL, getPrimaryModel(profile.model)) &&
+      (!includeApiKey || !profile.apiKey ||
+        sameOptionalEnvValue(processEnv.CODEX_API_KEY, profile.apiKey))
+    )
+  }
+
   return (
     processEnv.CLAUDE_CODE_USE_OPENAI !== undefined &&
     processEnv.CLAUDE_CODE_USE_GEMINI === undefined &&
@@ -491,6 +529,7 @@ function isProcessEnvAlignedWithProfile(
     sameOptionalEnvValue(processEnv.OPENAI_BASE_URL, profile.baseUrl) &&
     sameOptionalEnvValue(processEnv.OPENAI_MODEL, getPrimaryModel(profile.model)) &&
     (!includeApiKey ||
+      !profile.apiKey ||
       sameOptionalEnvValue(processEnv.OPENAI_API_KEY, profile.apiKey)) &&
     (profile.baseUrl?.toLowerCase().includes('bankr')
       ? !includeApiKey ||
@@ -526,6 +565,10 @@ export function clearProviderProfileEnvFromProcessEnv(
   delete processEnv.OPENAI_API_BASE
   delete processEnv.OPENAI_MODEL
   delete processEnv.OPENAI_API_KEY
+  delete processEnv.CODEX_API_KEY
+  delete processEnv.CODEX_CREDENTIAL_SOURCE
+  delete processEnv.CHATGPT_ACCOUNT_ID
+  delete processEnv.CODEX_ACCOUNT_ID
 
   delete processEnv.ANTHROPIC_BASE_URL
   delete processEnv.ANTHROPIC_MODEL
@@ -613,7 +656,23 @@ export function applyProviderProfileToProcessEnv(profile: ProviderProfile): void
   process.env.OPENAI_BASE_URL = profile.baseUrl
   process.env.OPENAI_MODEL = getPrimaryModel(profile.model)
 
-  if (profile.apiKey) {
+  if (profile.provider === 'codex' || isCodexBaseUrl(profile.baseUrl)) {
+    const credentials = readCodexCredentials()
+    const accountId = credentials?.accountId
+    if (profile.apiKey) {
+      process.env.CODEX_API_KEY = profile.apiKey
+      process.env.CODEX_CREDENTIAL_SOURCE = 'existing'
+    } else {
+      delete process.env.OPENAI_API_KEY
+      delete process.env.CODEX_API_KEY
+      process.env.CODEX_CREDENTIAL_SOURCE = 'oauth'
+      if (accountId) {
+        process.env.CHATGPT_ACCOUNT_ID = accountId
+      }
+    }
+  }
+
+  if (profile.apiKey && !(profile.provider === 'codex' || isCodexBaseUrl(profile.baseUrl))) {
     process.env.OPENAI_API_KEY = profile.apiKey
     // Also set provider-specific API keys for detection
     const baseUrl = profile.baseUrl.toLowerCase()
@@ -854,11 +913,37 @@ export function getProfileModelOptions(profile: ProviderProfile): ModelOption[] 
   }))
 }
 
+function buildCodexStartupEnv(activeProfile: ProviderProfile): ProfileEnv | null {
+  if (activeProfile.apiKey) {
+    return {
+      OPENAI_BASE_URL: activeProfile.baseUrl || DEFAULT_CODEX_BASE_URL,
+      OPENAI_MODEL: getPrimaryModel(activeProfile.model) || 'codexplan',
+      CODEX_API_KEY: activeProfile.apiKey,
+      CODEX_CREDENTIAL_SOURCE: 'existing',
+    }
+  }
+
+  const credentials = readCodexCredentials()
+  const profileEnv = credentials
+    ? buildCodexOAuthProfileEnv({
+        accessToken: credentials.accessToken,
+        accountId: credentials.accountId,
+        idToken: credentials.idToken,
+      })
+    : null
+
+  return profileEnv ?? {
+    OPENAI_BASE_URL: activeProfile.baseUrl || DEFAULT_CODEX_BASE_URL,
+    OPENAI_MODEL: getPrimaryModel(activeProfile.model) || 'codexplan',
+    CODEX_CREDENTIAL_SOURCE: 'oauth',
+  }
+}
+
 function buildOpenAICompatibleStartupEnv(
   activeProfile: ProviderProfile,
 ): ProfileEnv | null {
   if (isCodexBaseUrl(activeProfile.baseUrl)) {
-    return null
+    return buildCodexStartupEnv(activeProfile)
   }
 
   if (activeProfile.apiKey) {
@@ -920,11 +1005,6 @@ export function setActiveProviderProfile(
 
   // Keep startup persisted provider profile in sync so initial startup
   // uses the selected provider/model.
-  const persistedProfile = (() => {
-    if (activeProfile.provider === 'anthropic') return 'openai' as const
-    return activeProfile.provider
-  })()
-
   const profileEnv = (() => {
     switch (activeProfile.provider) {
       case 'gemini':
@@ -973,7 +1053,9 @@ export function setActiveProviderProfile(
             },
           } as const)
         : ({
-            profile: activeProfile.provider as ProviderProfileStartup,
+            profile: (isCodexBaseUrl(activeProfile.baseUrl)
+              ? 'codex'
+              : activeProfile.provider) as ProviderProfileStartup,
             env: profileEnv,
           } as const)
 

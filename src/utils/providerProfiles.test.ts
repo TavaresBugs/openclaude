@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 import type { ProviderProfile } from './config.js'
 
@@ -23,10 +23,15 @@ const RESTORED_KEYS = [
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_VERTEX',
   'CLAUDE_CODE_USE_FOUNDRY',
+  'CODEX_PROVIDER_PROFILE_ENV_APPLIED',
   'OPENAI_BASE_URL',
   'OPENAI_API_BASE',
   'OPENAI_MODEL',
   'OPENAI_API_KEY',
+  'CODEX_API_KEY',
+  'CODEX_CREDENTIAL_SOURCE',
+  'CHATGPT_ACCOUNT_ID',
+  'CODEX_ACCOUNT_ID',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
   'ANTHROPIC_API_KEY',
@@ -68,6 +73,12 @@ function saveMockGlobalConfig(
 ): void {
   mockConfigState = updater(mockConfigState)
 }
+
+beforeEach(() => {
+  for (const key of RESTORED_KEYS) {
+    delete process.env[key]
+  }
+})
 
 afterEach(() => {
   for (const key of RESTORED_KEYS) {
@@ -128,6 +139,17 @@ function buildGeminiProfile(overrides: Partial<ProviderProfile> = {}): ProviderP
     provider: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     model: 'gemini-3-flash-preview',
+    ...overrides,
+  })
+}
+
+function buildCodexProfile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
+  return buildProfile({
+    provider: 'openai',
+    name: 'OpenAI / Codex OAuth - Assinatura',
+    baseUrl: 'https://chatgpt.com/backend-api/codex',
+    model: 'codexplan',
+    apiKey: undefined,
     ...overrides,
   })
 }
@@ -202,6 +224,24 @@ describe('applyProviderProfileToProcessEnv', () => {
     expect(process.env.CLAUDE_CODE_USE_GITHUB).toBeUndefined()
     expect(process.env.CLAUDE_CODE_USE_OPENAI).toBeUndefined()
     expect(getFreshAPIProvider()).toBe('firstParty')
+  })
+
+  test('codex profile uses OpenAI transport with Codex OAuth markers', async () => {
+    const { applyProviderProfileToProcessEnv } =
+      await importFreshProviderProfileModules()
+    process.env.CLAUDE_CODE_USE_GEMINI = '1'
+    process.env.OPENAI_API_KEY = 'stale-openai-key'
+    process.env.CODEX_API_KEY = 'stale-codex-key'
+
+    applyProviderProfileToProcessEnv(buildCodexProfile())
+
+    expect(process.env.CLAUDE_CODE_USE_OPENAI).toBe('1')
+    expect(process.env.CLAUDE_CODE_USE_GEMINI).toBeUndefined()
+    expect(process.env.OPENAI_BASE_URL).toBe('https://chatgpt.com/backend-api/codex')
+    expect(process.env.OPENAI_MODEL).toBe('codexplan')
+    expect(process.env.OPENAI_API_KEY).toBeUndefined()
+    expect(process.env.CODEX_API_KEY).toBeUndefined()
+    expect(process.env.CODEX_CREDENTIAL_SOURCE).toBe('oauth')
   })
 
   test('openai profile with multi-model string sets only first model in OPENAI_MODEL', async () => {
@@ -604,6 +644,18 @@ describe('getProviderPresetDefaults', () => {
     )
     expect(defaults.requiresApiKey).toBe(true)
   })
+
+  test('codex preset defaults to OpenAI-compatible Codex profile', async () => {
+    const { getProviderPresetDefaults } = await importFreshProviderProfileModules()
+
+    const defaults = getProviderPresetDefaults('codex')
+
+    expect(defaults.provider).toBe('openai')
+    expect(defaults.name).toBe('Codex')
+    expect(defaults.baseUrl).toBe('https://chatgpt.com/backend-api/codex')
+    expect(defaults.model).toBe('codexplan')
+    expect(defaults.requiresApiKey).toBe(false)
+  })
 })
 
 describe('setActiveProviderProfile', () => {
@@ -667,6 +719,43 @@ describe('setActiveProviderProfile', () => {
         OPENAI_BASE_URL: 'http://localhost:11434/v1',
         OPENAI_MODEL: 'llama3.1:8b',
       })
+    } finally {
+      process.chdir(originalCwd)
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('persists codex OAuth profiles as Codex startup env', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'openclaude-provider-'))
+    process.chdir(tempDir)
+    process.env.OPENAI_API_KEY = 'sk-shell-should-not-persist'
+
+    try {
+      const { setActiveProviderProfile } =
+        await importFreshProviderProfileModules()
+      const codexProfile = buildCodexProfile({
+        id: 'codex_prof',
+        model: 'codexplan, gpt-5.5',
+      })
+
+      saveMockGlobalConfig(current => ({
+        ...current,
+        providerProfiles: [codexProfile],
+      }))
+
+      const result = setActiveProviderProfile('codex_prof')
+      const persisted = JSON.parse(
+        readFileSync(join(tempDir, '.openclaude-profile.json'), 'utf8'),
+      )
+
+      expect(result?.id).toBe('codex_prof')
+      expect(persisted.profile).toBe('codex')
+      expect(persisted.env).toEqual({
+        OPENAI_BASE_URL: 'https://chatgpt.com/backend-api/codex',
+        OPENAI_MODEL: 'codexplan',
+        CODEX_CREDENTIAL_SOURCE: 'oauth',
+      })
+      expect(process.env.OPENAI_API_KEY).toBeUndefined()
     } finally {
       process.chdir(originalCwd)
       rmSync(tempDir, { recursive: true, force: true })

@@ -17,6 +17,7 @@ import { shouldUseClaudeAIAuth } from './client.js'
  */
 export class AuthCodeListener {
   private localServer: Server
+  private closeTimer: NodeJS.Timeout | null = null
   private port: number = 0
   private promiseResolver: ((authorizationCode: string) => void) | null = null
   private promiseRejecter: ((error: Error) => void) | null = null
@@ -25,8 +26,8 @@ export class AuthCodeListener {
   private callbackPath: string // Configurable callback path
 
   constructor(callbackPath: string = '/callback') {
-    this.localServer = createServer()
     this.callbackPath = callbackPath
+    this.localServer = createServer(this.handleRedirect.bind(this))
   }
 
   /**
@@ -42,8 +43,10 @@ export class AuthCodeListener {
         )
       })
 
-      // Listen on specified port or 0 to let the OS assign an available port
+      // Listen on localhost only. The request handler is installed before
+      // listen() so early browser requests never hang without a response.
       this.localServer.listen(port ?? 0, 'localhost', () => {
+        this.localServer.unref()
         const address = this.localServer.address() as AddressInfo
         this.port = address.port
         resolve(this.port)
@@ -57,6 +60,20 @@ export class AuthCodeListener {
 
   hasPendingResponse(): boolean {
     return this.pendingResponse !== null
+  }
+
+  /**
+   * Keep the callback listener from lingering forever if the UI disappears or
+   * cancellation input is swallowed by the terminal.
+   */
+  closeAfter(ms: number): void {
+    if (this.closeTimer) {
+      clearTimeout(this.closeTimer)
+    }
+    this.closeTimer = setTimeout(() => {
+      this.cancelPendingAuthorization()
+    }, ms)
+    this.closeTimer.unref()
   }
 
   async waitForAuthorization(
@@ -182,11 +199,7 @@ export class AuthCodeListener {
   }
 
   private startLocalListener(onReady: () => Promise<void>): void {
-    // Server is already created and listening, just set up handlers
-    this.localServer.on('request', this.handleRedirect.bind(this))
-    this.localServer.on('error', this.handleError.bind(this))
-
-    // Server is already listening, so we can call onReady immediately
+    // Server is already listening with its request handler installed, so we can call onReady immediately.
     void onReady()
   }
 
@@ -199,6 +212,18 @@ export class AuthCodeListener {
     if (parsedUrl.pathname !== this.callbackPath) {
       res.writeHead(404)
       res.end()
+      return
+    }
+
+    const oauthError = parsedUrl.searchParams.get('error') ?? undefined
+    if (oauthError) {
+      const description = parsedUrl.searchParams.get('error_description') ?? undefined
+      const requestId = parsedUrl.searchParams.get('request_id') ?? undefined
+      const parts = [description ?? `Authentication error: ${oauthError}`]
+      if (requestId) parts.push(`Request ID: ${requestId}`)
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Authentication failed')
+      this.reject(new Error(parts.join(' — ')))
       return
     }
 
@@ -257,17 +282,22 @@ export class AuthCodeListener {
   }
 
   close(): void {
+    if (this.closeTimer) {
+      clearTimeout(this.closeTimer)
+      this.closeTimer = null
+    }
+
     // If we have a pending response, send a redirect before closing
     if (this.pendingResponse) {
       this.handleErrorRedirect()
     }
 
     if (this.localServer) {
-      // Remove all listeners to prevent memory leaks
-      this.localServer.removeAllListeners()
+      this.localServer.closeAllConnections()
       this.localServer.close()
     }
 
+    this.pendingResponse = null
     this.expectedState = null
     this.port = 0
   }

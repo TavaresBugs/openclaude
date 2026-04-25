@@ -7,6 +7,7 @@ import { CodexOAuthService } from './codexOAuth.js'
 const originalFetch = globalThis.fetch
 const originalCallbackPort = process.env.CODEX_OAUTH_CALLBACK_PORT
 const originalClientId = process.env.CODEX_OAUTH_CLIENT_ID
+const originalTimeoutMs = process.env.CODEX_OAUTH_TIMEOUT_MS
 
 afterEach(() => {
   mock.restore()
@@ -22,6 +23,12 @@ afterEach(() => {
     delete process.env.CODEX_OAUTH_CLIENT_ID
   } else {
     process.env.CODEX_OAUTH_CLIENT_ID = originalClientId
+  }
+
+  if (originalTimeoutMs === undefined) {
+    delete process.env.CODEX_OAUTH_TIMEOUT_MS
+  } else {
+    process.env.CODEX_OAUTH_TIMEOUT_MS = originalTimeoutMs
   }
 })
 
@@ -67,6 +74,7 @@ function buildCallbackRequest(authUrl: string): string {
 test('serves updated success copy after a successful Codex OAuth flow', async () => {
   const callbackPort = await getFreePort()
   process.env.CODEX_OAUTH_CALLBACK_PORT = String(callbackPort)
+  process.env.CODEX_OAUTH_TIMEOUT_MS = '1000'
   process.env.CODEX_OAUTH_CLIENT_ID = 'test-client-id'
 
   globalThis.fetch = mock(async (input, init) => {
@@ -107,9 +115,23 @@ test('serves updated success copy after a successful Codex OAuth flow', async ()
   expect(html).not.toContain('continue automatically')
 })
 
+test('OAuth listener times out and closes when login never completes', async () => {
+  const callbackPort = await getFreePort()
+  process.env.CODEX_OAUTH_CALLBACK_PORT = String(callbackPort)
+  process.env.CODEX_OAUTH_TIMEOUT_MS = '25'
+
+  const service = new CodexOAuthService()
+
+  const flowPromise = service.startOAuthFlow(async () => {})
+
+  await expect(flowPromise).rejects.toThrow('OAuth authorization was cancelled.')
+  await expect(originalFetch(`http://localhost:${callbackPort}/auth/callback`)).rejects.toThrow()
+})
+
 test('cancellation during token exchange returns a cancelled page and rejects the flow', async () => {
   const callbackPort = await getFreePort()
   process.env.CODEX_OAUTH_CALLBACK_PORT = String(callbackPort)
+  process.env.CODEX_OAUTH_TIMEOUT_MS = '1000'
   process.env.CODEX_OAUTH_CLIENT_ID = 'test-client-id'
 
   let resolveFetchStart!: () => void

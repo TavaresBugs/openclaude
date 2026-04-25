@@ -46,6 +46,8 @@ export function useCodexOAuthFlow(options: {
     tokens: CodexOAuthTokens,
     persistCredentials: PersistCodexOAuthCredentials,
   ) => void | Promise<void>
+  /** When true, skips auto-opening the browser — URL is shown for manual copy. */
+  skipBrowserOpen?: boolean
   deps?: CodexOAuthFlowDependencies
 }): CodexOAuthFlowStatus {
   const { onAuthenticated } = options
@@ -80,6 +82,10 @@ export function useCodexOAuthFlow(options: {
           authUrl,
           browserOpened: null,
         })
+        if (options.skipBrowserOpen) {
+          if (!cancelled) setStatus({ state: 'waiting', authUrl, browserOpened: false })
+          return
+        }
         const browserOpened = await openBrowserFn(authUrl)
         if (cancelled) return
         setStatus({

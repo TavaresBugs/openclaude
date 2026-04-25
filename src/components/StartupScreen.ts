@@ -5,7 +5,11 @@
  * Addresses: https://github.com/Gitlawb/openclaude/issues/55
  */
 
+import { existsSync, readFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import { isLocalProviderUrl, resolveProviderRequest } from '../services/api/providerConfig.js'
+// fs/os/path imports remain — used by detectAuthStatus (exported for ProviderManager)
 import { getLocalOpenAICompatibleProviderLabel } from '../utils/providerDiscovery.js'
 import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 import { parseUserSpecifiedModel } from '../utils/model/model.js'
@@ -164,6 +168,93 @@ export function detectProvider(): { name: string; model: string; baseUrl: string
   const baseUrl = process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com'
   const isLocal = isLocalProviderUrl(baseUrl)
   return { name: 'Anthropic', model: resolvedModel, baseUrl, isLocal }
+}
+
+// ─── Auth status ─────────────────────────────────────────────────────────────
+
+type AuthStatus =
+  | { state: 'valid'; expiresInSec: number }
+  | { state: 'expired'; expiredAgoSec: number }
+  | { state: 'api-key' }
+  | { state: 'unknown' }
+
+function decodeJwtExp(token: string): number | null {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString())
+    return typeof decoded.exp === 'number' ? decoded.exp : null
+  } catch {
+    return null
+  }
+}
+
+function readJwtFromFile(filePath: string, ...path: string[]): string | null {
+  try {
+    const raw = JSON.parse(readFileSync(filePath, 'utf8'))
+    let node: unknown = raw
+    for (const key of path) {
+      if (!node || typeof node !== 'object') return null
+      node = (node as Record<string, unknown>)[key]
+    }
+    return typeof node === 'string' && node.length > 0 ? node : null
+  } catch {
+    return null
+  }
+}
+
+export function detectAuthStatus(): AuthStatus {
+  const now = Math.floor(Date.now() / 1000)
+
+  // Codex OAuth: ~/.codex/auth.json  →  tokens.id_token
+  const codexAuthPath = process.env.CODEX_AUTH_PATH ?? join(homedir(), '.codex', 'auth.json')
+  if (existsSync(codexAuthPath)) {
+    const token = readJwtFromFile(codexAuthPath, 'tokens', 'id_token')
+      ?? readJwtFromFile(codexAuthPath, 'tokens', 'access_token')
+    if (token) {
+      const exp = decodeJwtExp(token)
+      if (exp !== null) {
+        const diff = exp - now
+        return diff > 0
+          ? { state: 'valid', expiresInSec: diff }
+          : { state: 'expired', expiredAgoSec: -diff }
+      }
+    }
+    return { state: 'api-key' }
+  }
+
+  // API key providers — no JWT to inspect
+  const hasApiKey =
+    process.env.OPENAI_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.MISTRAL_API_KEY
+  if (hasApiKey) return { state: 'api-key' }
+
+  return { state: 'unknown' }
+}
+
+function formatAuthRow(auth: AuthStatus): string {
+  if (auth.state === 'api-key') return 'API key'
+  if (auth.state === 'unknown') return 'not configured'
+
+  const sec = auth.state === 'valid' ? auth.expiresInSec : auth.expiredAgoSec
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+
+  if (auth.state === 'valid') {
+    if (d > 0) return `valid · ${d}d ${h}h left`
+    if (h > 0) return `valid · ${h}h ${m}m left`
+    return `valid · ${m}m left`
+  }
+  // expired
+  if (d > 0) return `expired ${d}d ${h}h ago — re-auth needed`
+  if (h > 0) return `expired ${h}h ${m}m ago — re-auth needed`
+  return `expired ${m}m ago — re-auth needed`
 }
 
 // ─── Box drawing ──────────────────────────────────────────────────────────────

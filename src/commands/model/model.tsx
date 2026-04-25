@@ -21,6 +21,11 @@ import { getDefaultMainLoopModelSetting, isOpus1mMergeEnabled, renderDefaultMode
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { validateModel } from '../../utils/model/validateModel.js';
 import { getAdditionalModelOptionsCacheScope } from '../../services/api/providerConfig.js';
+import { ProviderModelSwitcher } from './ProviderModelSwitcher.js';
+import { getProviderProfiles } from '../../utils/providerProfiles.js';
+import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 function ModelPickerWrapper(t0) {
   const $ = _c(17);
   const {
@@ -321,6 +326,14 @@ export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
     });
     return <SetModelAndClose args={args} onDone={onDone} />;
   }
+  const hasExternalProviders =
+    getProviderProfiles().length > 0 ||
+    existsSync(join(homedir(), '.codex', 'auth.json'))
+
+  if (hasExternalProviders) {
+    return <ProviderModelSwitcher onDone={onDone} />
+  }
+
   if (getAdditionalModelOptionsCacheScope()?.startsWith('openai:')) {
     void refreshOpenAIModelOptionsCache();
   }

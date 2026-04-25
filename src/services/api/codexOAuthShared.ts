@@ -2,6 +2,7 @@ export const CODEX_OAUTH_ISSUER = 'https://auth.openai.com'
 export const CODEX_REFRESH_URL = `${CODEX_OAUTH_ISSUER}/oauth/token`
 export const DEFAULT_CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const DEFAULT_CODEX_OAUTH_CALLBACK_PORT = 1455
+export const DEFAULT_CODEX_OAUTH_TIMEOUT_MS = 10 * 60 * 1000
 export const CODEX_OAUTH_SCOPE =
   'openid profile email offline_access api.connectors.read api.connectors.invoke'
 export const CODEX_OAUTH_ORIGINATOR = 'codex_cli_rs'
@@ -37,6 +38,22 @@ export function getCodexOAuthCallbackPort(
   }
 
   return DEFAULT_CODEX_OAUTH_CALLBACK_PORT
+}
+
+export function getCodexOAuthTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const rawTimeout = asTrimmedString(env.CODEX_OAUTH_TIMEOUT_MS)
+  if (!rawTimeout) {
+    return DEFAULT_CODEX_OAUTH_TIMEOUT_MS
+  }
+
+  const parsed = Number.parseInt(rawTimeout, 10)
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed
+  }
+
+  return DEFAULT_CODEX_OAUTH_TIMEOUT_MS
 }
 
 export function decodeJwtPayload(

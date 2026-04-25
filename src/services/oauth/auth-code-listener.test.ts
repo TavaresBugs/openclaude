@@ -10,6 +10,16 @@ afterEach(() => {
   }
 })
 
+test('responds to requests immediately after start', async () => {
+  const listener = new AuthCodeListener('/callback')
+  listeners.push(listener)
+
+  const port = await listener.start()
+  const response = await fetch(`http://localhost:${port}/`)
+
+  expect(response.status).toBe(404)
+})
+
 test('cancelPendingAuthorization rejects a pending OAuth wait', async () => {
   const listener = new AuthCodeListener('/callback')
   listeners.push(listener)

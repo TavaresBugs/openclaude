@@ -13,6 +13,7 @@ import {
   exchangeCodexIdTokenForApiKey,
   getCodexOAuthCallbackPort,
   getCodexOAuthClientId,
+  getCodexOAuthTimeoutMs,
   parseChatgptAccountId,
 } from './codexOAuthShared.js'
 
@@ -192,6 +193,7 @@ export class CodexOAuthService {
 
     try {
       const port = await authCodeListener.start(callbackPort)
+      authCodeListener.closeAfter(getCodexOAuthTimeoutMs())
       this.port = port
 
       const state = generateState()
@@ -301,6 +303,7 @@ export class CodexOAuthService {
     }
 
     this.authCodeListener?.cancelPendingAuthorization(cancellationError)
+    this.authCodeListener?.close()
     this.authCodeListener = null
     this.port = null
   }

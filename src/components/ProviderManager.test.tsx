@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import { afterEach, expect, mock, test } from 'bun:test'
@@ -111,7 +114,6 @@ const PRESET_ORDER = [
   'Atomic Chat',
   'Azure OpenAI',
   'Bankr',
-  'Codex OAuth',
   'DeepSeek',
   'Google Gemini',
   'Groq',
@@ -121,7 +123,7 @@ const PRESET_ORDER = [
   'Moonshot AI',
   'NVIDIA NIM',
   'Ollama',
-  'OpenAI',
+  'OpenAI / Codex',
   'OpenRouter',
   'Together AI',
   'Custom',
@@ -467,7 +469,7 @@ test('ProviderManager avoids first-frame false negative while stored-token looku
     frame => frame.includes('Provider manager'),
   )
 
-  expect(firstFrame).toContain('Checking GitHub Models credentials...')
+  expect(firstFrame).toContain('Checking for providers...')
   expect(firstFrame).not.toContain('No provider profiles configured yet.')
 
   deferredStoredToken.resolve('stored-token')
@@ -635,10 +637,22 @@ test('ProviderManager first-run Codex OAuth switches the current session after l
 
   await waitForFrameOutput(
     mounted.getOutput,
-    frame => frame.includes('Set up provider') && frame.includes('Codex OAuth'),
+    frame => frame.includes('Set up provider') && frame.includes('OpenAI / Codex'),
   )
 
-  await navigateToPreset(mounted.stdin, 'Codex OAuth')
+  await navigateToPreset(mounted.stdin, 'OpenAI / Codex')
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('OpenAI / Codex auth method') && frame.includes('OAuth / Assinatura'),
+  )
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('Codex OAuth / Assinatura — how to open?'),
+  )
   mounted.stdin.write('\r')
 
   await waitForCondition(() => onDone.mock.calls.length > 0)
@@ -646,7 +660,7 @@ test('ProviderManager first-run Codex OAuth switches the current session after l
   expect(addProviderProfile).toHaveBeenCalledWith(
     expect.objectContaining({
       provider: 'openai',
-      name: 'Codex OAuth',
+      name: 'OpenAI / Codex OAuth - Assinatura',
       baseUrl: 'https://chatgpt.com/backend-api/codex',
       model: 'codexplan',
       apiKey: '',
@@ -661,9 +675,75 @@ test('ProviderManager first-run Codex OAuth switches the current session after l
     expect.objectContaining({
       action: 'saved',
       message:
-        'Codex OAuth configured. OpenClaude switched to it for this session.',
+        'Codex OAuth / Assinatura configured. OpenClaude switched to it for this session.',
     }),
   )
+
+  await mounted.dispose()
+})
+
+test('ProviderManager manual Codex OAuth flow shows the full sign-in URL', async () => {
+  delete process.env.CLAUDE_CODE_SIMPLE
+  delete process.env.CLAUDE_CODE_USE_GITHUB
+  delete process.env.GITHUB_TOKEN
+  delete process.env.GH_TOKEN
+
+  const authUrl =
+    'https://auth.openai.com/oauth/authorize?response_type=code&client_id=test-client&state=test-state'
+  const savedAuthUrlPath = join(tmpdir(), 'openclaude-codex-signin-url.txt')
+
+  mockProviderManagerDependencies(
+    () => undefined,
+    async () => undefined,
+    {
+      useCodexOAuthFlow: () => ({
+        state: 'waiting',
+        authUrl,
+        browserOpened: false,
+      }),
+    },
+  )
+
+  const nonce = `${Date.now()}-${Math.random()}`
+  const { ProviderManager } = await import(`./ProviderManager.js?ts=${nonce}`)
+  const mounted = await mountProviderManager(ProviderManager, {
+    mode: 'first-run',
+  })
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('Set up provider') && frame.includes('OpenAI / Codex'),
+  )
+
+  await navigateToPreset(mounted.stdin, 'OpenAI / Codex')
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('OpenAI / Codex auth method') && frame.includes('OAuth / Assinatura'),
+  )
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('Codex OAuth / Assinatura — how to open?'),
+  )
+
+  mounted.stdin.write('j')
+  await Bun.sleep(25)
+  mounted.stdin.write('\r')
+
+  const manualFrame = await waitForFrameOutput(
+    mounted.getOutput,
+    frame =>
+      frame.includes('Open this URL in the browser where you are logged into ChatGPT:') &&
+      frame.includes(authUrl),
+  )
+
+  expect(manualFrame).toContain(authUrl)
+  expect(manualFrame).not.toContain('https://auth.openai.com/oauth/authorize?...')
+  expect(manualFrame).toContain(savedAuthUrlPath)
+  expect(readFileSync(savedAuthUrlPath, 'utf8')).toBe(`${authUrl}\n`)
 
   await mounted.dispose()
 })
@@ -727,10 +807,22 @@ test('ProviderManager first-run Codex OAuth reports next-startup fallback when s
 
   await waitForFrameOutput(
     mounted.getOutput,
-    frame => frame.includes('Set up provider') && frame.includes('Codex OAuth'),
+    frame => frame.includes('Set up provider') && frame.includes('OpenAI / Codex'),
   )
 
-  await navigateToPreset(mounted.stdin, 'Codex OAuth')
+  await navigateToPreset(mounted.stdin, 'OpenAI / Codex')
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('OpenAI / Codex auth method') && frame.includes('OAuth / Assinatura'),
+  )
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('Codex OAuth / Assinatura — how to open?'),
+  )
   mounted.stdin.write('\r')
 
   await waitForCondition(() => onDone.mock.calls.length > 0)
@@ -742,7 +834,7 @@ test('ProviderManager first-run Codex OAuth reports next-startup fallback when s
     expect.objectContaining({
       action: 'saved',
       message:
-        'Codex OAuth configured. Saved for next startup. Warning: validation failed.',
+        'Codex OAuth / Assinatura configured. Saved for next startup. Warning: validation failed.',
     }),
   )
 
@@ -759,7 +851,7 @@ test('ProviderManager does not hijack a manual Codex profile when OAuth credenti
   const manualProfile = {
     id: 'provider_manual_codex',
     provider: 'openai',
-    name: 'Codex OAuth',
+    name: 'Codex',
     baseUrl: 'https://chatgpt.com/backend-api/codex',
     model: 'gpt-5.4',
     apiKey: 'manual-key',
@@ -821,10 +913,22 @@ test('ProviderManager does not hijack a manual Codex profile when OAuth credenti
 
   await waitForFrameOutput(
     mounted.getOutput,
-    frame => frame.includes('Set up provider') && frame.includes('Codex OAuth'),
+    frame => frame.includes('Set up provider') && frame.includes('OpenAI / Codex'),
   )
 
-  await navigateToPreset(mounted.stdin, 'Codex OAuth')
+  await navigateToPreset(mounted.stdin, 'OpenAI / Codex')
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('OpenAI / Codex auth method') && frame.includes('OAuth / Assinatura'),
+  )
+  mounted.stdin.write('\r')
+
+  await waitForFrameOutput(
+    mounted.getOutput,
+    frame => frame.includes('Codex OAuth / Assinatura — how to open?'),
+  )
   mounted.stdin.write('\r')
 
   await waitForCondition(() => onDone.mock.calls.length > 0)
@@ -847,7 +951,7 @@ test('ProviderManager keeps Codex OAuth as next-startup only when activating the
   const codexProfile = {
     id: 'provider_codex_oauth',
     provider: 'openai',
-    name: 'Codex OAuth',
+    name: 'OpenAI / Codex OAuth - Assinatura',
     baseUrl: 'https://chatgpt.com/backend-api/codex',
     model: 'codexplan',
     apiKey: '',
@@ -883,7 +987,7 @@ test('ProviderManager keeps Codex OAuth as next-startup only when activating the
     frame =>
       frame.includes('Provider manager') &&
       frame.includes('Set active provider') &&
-      frame.includes('Log out Codex OAuth'),
+      frame.includes('Log out Codex'),
   )
 
   mounted.stdin.write('j')
@@ -892,7 +996,7 @@ test('ProviderManager keeps Codex OAuth as next-startup only when activating the
 
   await waitForFrameOutput(
     mounted.getOutput,
-    frame => frame.includes('Set active provider') && frame.includes('Codex OAuth'),
+    frame => frame.includes('Set active provider') && frame.includes('OpenAI / Codex OAuth - Assinatura'),
   )
 
   await Bun.sleep(25)
@@ -906,7 +1010,7 @@ test('ProviderManager keeps Codex OAuth as next-startup only when activating the
   const output = stripAnsi(extractLastFrame(mounted.getOutput()))
 
   expect(output).toContain(
-    'Active provider: Codex OAuth. Saved for next startup. Warning: validation failed.',
+    'Active provider: OpenAI / Codex OAuth - Assinatura. Saved for next startup. Warning: validation failed.',
   )
   expect(applySavedProfileToCurrentSession).toHaveBeenCalled()
   expect(setActiveProviderProfile).toHaveBeenCalledWith('provider_codex_oauth')
@@ -1139,11 +1243,11 @@ test('ProviderManager resolves Codex OAuth state from async storage without sync
   const output = await renderProviderManagerFrame(ProviderManager, {
     waitForOutput: frame =>
       frame.includes('Provider manager') &&
-      frame.includes('Log out Codex OAuth'),
+      frame.includes('Log out Codex'),
   })
 
   expect(output).toContain('Provider manager')
-  expect(output).toContain('Log out Codex OAuth')
+  expect(output).toContain('Log out Codex')
   expect(codexSyncRead).not.toHaveBeenCalled()
   expect(codexAsyncRead).toHaveBeenCalled()
 })

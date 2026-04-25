@@ -104,7 +104,7 @@ function describeOllamaReadinessIssue(
   return ''
 }
 
-type ProviderChoice = 'auto' | ProviderProfile | 'codex-oauth' | 'clear'
+type ProviderChoice = 'auto' | ProviderProfile | 'clear'
 
 type Step =
   | { name: 'choose' }
@@ -135,8 +135,11 @@ type Step =
       apiKey?: string
       authMode: 'api-key' | 'access-token' | 'adc'
     }
+  | { name: 'codex-auth-method' }
   | { name: 'codex-oauth' }
   | { name: 'codex-check' }
+  | { name: 'codex-custom-model' }
+  | { name: 'codex-endpoint'; model: string }
 
 type CurrentProviderSummary = {
   providerLabel: string
@@ -616,10 +619,11 @@ function ProviderChooser({
       description: 'Use a local Ollama model with no API key',
     },
     {
-      label: 'OpenAI-compatible',
-      value: 'openai',
-      description:
-        'GPT-4o, DeepSeek, OpenRouter, Groq, LM Studio, and similar APIs',
+      label: 'Codex - OpenAI',
+      value: 'codex',
+      description: canUseCodexOAuth
+        ? 'GPT-4o, Codex CLI, OpenRouter, Groq — OAuth, API key, or existing credentials'
+        : 'GPT-4o, Codex CLI, OpenRouter, Groq — API key or existing credentials',
     },
     {
       label: 'Gemini',
@@ -631,21 +635,6 @@ function ProviderChooser({
       value: 'mistral',
       description: 'Use Mistral with API key'
     },
-    {
-      label: 'Codex',
-      value: 'codex',
-      description: 'Use existing ChatGPT Codex CLI auth or env credentials',
-    },
-    ...(canUseCodexOAuth
-      ? [
-          {
-            label: 'Codex OAuth',
-            value: 'codex-oauth' as const,
-            description:
-              'Sign in with ChatGPT in your browser and store Codex tokens securely',
-          },
-        ]
-      : []),
   ]
 
   if (summary.savedProfileLabel !== 'none') {
@@ -1038,8 +1027,16 @@ function CodexOAuthStep({
   })
 
   if (status.state === 'error') {
+    const isPostLoginStorageFailure = status.message.startsWith(
+      'Codex OAuth succeeded, but credentials could not be saved securely.',
+    )
+
     return (
-      <Dialog title="Codex OAuth failed" onCancel={onCancel} color="warning">
+      <Dialog
+        title={isPostLoginStorageFailure ? 'Codex OAuth storage failed' : 'Codex OAuth failed'}
+        onCancel={onCancel}
+        color="warning"
+      >
         <Box flexDirection="column" gap={1}>
           <Text>{status.message}</Text>
           <Select
@@ -1088,11 +1085,11 @@ function CodexOAuthStep({
 }
 
 function CodexCredentialStep({
-  onSave,
+  onModelChosen,
   onBack,
   onCancel,
 }: {
-  onSave: (profile: ProviderProfile, env: ProfileEnv) => void
+  onModelChosen: (model: string) => void
   onBack: () => void
   onCancel: () => void
 }): React.ReactNode {
@@ -1120,14 +1117,39 @@ function CodexCredentialStep({
 
   const options: OptionWithDescription<string>[] = [
     {
-      label: 'codexplan',
+      label: 'codexplan — GPT-5.4 (Recommended)',
       value: 'codexplan',
       description: 'GPT-5.4 with higher reasoning on the Codex backend',
     },
     {
-      label: 'codexspark',
+      label: 'codexspark — GPT-5.3 Spark',
       value: 'codexspark',
       description: 'Faster Codex Spark tool loop profile',
+    },
+    {
+      label: 'gpt-5.3-codex',
+      value: 'gpt-5.3-codex',
+      description: 'GPT-5.3 Codex with high reasoning',
+    },
+    {
+      label: 'gpt-5.2-codex',
+      value: 'gpt-5.2-codex',
+      description: 'GPT-5.2 Codex with high reasoning',
+    },
+    {
+      label: 'gpt-5.1-codex-max',
+      value: 'gpt-5.1-codex-max',
+      description: 'GPT-5.1 Codex Max with high reasoning',
+    },
+    {
+      label: 'gpt-5.1-codex-mini',
+      value: 'gpt-5.1-codex-mini',
+      description: 'GPT-5.1 Codex Mini, faster responses',
+    },
+    {
+      label: 'Custom...',
+      value: 'custom',
+      description: 'Enter a custom model name and endpoint URL',
     },
   ]
 
@@ -1145,14 +1167,7 @@ function CodexCredentialStep({
           inlineDescriptions
           visibleOptionCount={options.length}
           onChange={(value: string) => {
-            const env = buildCodexProfileEnv({
-              model: value,
-              credentialSource: credentials.credentialSource,
-              processEnv: process.env,
-            })
-            if (env) {
-              onSave('codex', env)
-            }
+            onModelChosen(value)
           }}
           onCancel={onBack}
         />
@@ -1204,6 +1219,111 @@ function resolveCodexCredentials(processEnv: NodeJS.ProcessEnv):
   }
 }
 
+function CodexEndpointStep({
+  model,
+  onSave,
+  onBack,
+  onCancel,
+}: {
+  model: string
+  onSave: (profile: ProviderProfile, env: ProfileEnv) => void
+  onBack: () => void
+  onCancel: () => void
+}): React.ReactNode {
+  const [enterCustom, setEnterCustom] = React.useState(false)
+  const credentials = resolveCodexCredentials(process.env)
+
+  if (!credentials.ok) {
+    return (
+      <Dialog title="Codex setup" onCancel={onCancel} color="warning">
+        <Box flexDirection="column" gap={1}>
+          <Text>{credentials.message}</Text>
+          <Select
+            options={[
+              { label: 'Back', value: 'back' },
+              { label: 'Cancel', value: 'cancel' },
+            ]}
+            onChange={(value: string) =>
+              value === 'back' ? onBack() : onCancel()
+            }
+            onCancel={onCancel}
+          />
+        </Box>
+      </Dialog>
+    )
+  }
+
+  const saveWithEndpoint = (baseUrl: string) => {
+    const env = buildCodexProfileEnv({
+      model,
+      baseUrl,
+      credentialSource: credentials.credentialSource,
+      processEnv: process.env,
+    })
+    if (env) {
+      onSave('codex', env)
+    }
+  }
+
+  if (enterCustom) {
+    return (
+      <TextEntryDialog
+        resetStateKey="codex-custom-endpoint"
+        title="Codex setup — Custom endpoint"
+        subtitle={`Model: ${model}`}
+        description={`Enter a custom endpoint URL. Leave blank for ${DEFAULT_CODEX_BASE_URL}.`}
+        initialValue={DEFAULT_CODEX_BASE_URL}
+        placeholder={DEFAULT_CODEX_BASE_URL}
+        allowEmpty
+        onSubmit={value =>
+          saveWithEndpoint(value.trim() || DEFAULT_CODEX_BASE_URL)
+        }
+        onCancel={() => setEnterCustom(false)}
+      />
+    )
+  }
+
+  const endpointOptions: OptionWithDescription<string>[] = [
+    {
+      label: 'Default',
+      value: 'default',
+      description: DEFAULT_CODEX_BASE_URL,
+    },
+    {
+      label: 'Custom...',
+      value: 'custom',
+      description: 'Enter a different endpoint URL',
+    },
+  ]
+
+  return (
+    <Dialog
+      title="Choose endpoint"
+      subtitle={`Model: ${model}`}
+      onCancel={onBack}
+    >
+      <Box flexDirection="column" gap={1}>
+        <Text>Choose the endpoint for this Codex profile.</Text>
+        <Select
+          options={endpointOptions}
+          defaultValue="default"
+          defaultFocusValue="default"
+          inlineDescriptions
+          visibleOptionCount={endpointOptions.length}
+          onChange={(value: string) => {
+            if (value === 'custom') {
+              setEnterCustom(true)
+            } else {
+              saveWithEndpoint(DEFAULT_CODEX_BASE_URL)
+            }
+          }}
+          onCancel={onBack}
+        />
+      </Box>
+    </Dialog>
+  )
+}
+
 export function ProviderWizard({
   onDone,
 }: {
@@ -1233,15 +1353,13 @@ export function ProviderWizard({
                 name: 'mistral-key',
                 defaultModel: defaults.mistralModel,
               })
-            } else if (value === 'codex-oauth') {
-              setStep({ name: 'codex-oauth' })
             } else if (value === 'clear') {
               const filePath = deleteProfileFile()
               onDone(`Removed saved provider profile at ${filePath}. Restart OpenClaude to go back to normal startup.`, {
                 display: 'system',
               })
             } else {
-              setStep({ name: 'codex-check' })
+              setStep({ name: 'codex-auth-method' })
             }
           }}
           onCancel={() => onDone()}
@@ -1665,17 +1783,98 @@ export function ProviderWizard({
     case 'codex-check':
       return (
         <CodexCredentialStep
-          onSave={(profile, env) => finishProfileSave(onDone, profile, env)}
+          onModelChosen={model => setStep({ name: 'codex-endpoint', model })}
           onBack={() => setStep({ name: 'choose' })}
           onCancel={() => onDone()}
         />
       )
 
+    case 'codex-custom-model':
+      return (
+        <TextEntryDialog
+          resetStateKey={step.name}
+          title="Codex custom setup"
+          description="Enter a model name for the Codex backend. Leave blank for gpt-5.4."
+          initialValue="gpt-5.4"
+          placeholder="gpt-5.4"
+          allowEmpty
+          onSubmit={value =>
+            setStep({
+              name: 'codex-endpoint',
+              model: value.trim() || 'gpt-5.4',
+            })
+          }
+          onCancel={() => setStep({ name: 'codex-check' })}
+        />
+      )
+
+    case 'codex-endpoint':
+      return (
+        <CodexEndpointStep
+          model={step.model}
+          onSave={(profile, env) => finishProfileSave(onDone, profile, env)}
+          onBack={() =>
+            step.model === 'custom'
+              ? setStep({ name: 'codex-custom-model' })
+              : setStep({ name: 'codex-check' })
+          }
+          onCancel={() => onDone()}
+        />
+      )
+
+    case 'codex-auth-method': {
+      const canOAuth = !isBareMode()
+      const authOptions: OptionWithDescription[] = [
+        ...(canOAuth
+          ? [
+              {
+                label: 'Sign in with ChatGPT (OAuth)',
+                value: 'oauth',
+                description:
+                  'Open your browser to sign in and store tokens securely',
+              },
+            ]
+          : []),
+        {
+          label: 'API key',
+          value: 'api-key',
+          description: 'Enter a Codex or OpenAI-compatible API key',
+        },
+        {
+          label: 'Existing credentials',
+          value: 'existing',
+          description: 'Use auth.json or environment variables already configured',
+        },
+      ]
+      return (
+        <Dialog title="Codex setup" onCancel={() => onDone()}>
+          <Box flexDirection="column" gap={1}>
+            <Text>Choose how to authenticate with Codex.</Text>
+            <Select
+              options={authOptions}
+              inlineDescriptions
+              visibleOptionCount={authOptions.length}
+              onChange={(value: string) => {
+                if (value === 'oauth') {
+                  setStep({ name: 'codex-oauth' })
+                } else if (value === 'api-key') {
+                  setStep({ name: 'openai-key', defaultModel: defaults.openAIModel })
+                } else {
+                  setStep({ name: 'codex-check' })
+                }
+              }}
+              onCancel={() => setStep({ name: 'choose' })}
+            />
+          </Box>
+        </Dialog>
+      )
+    }
+
     case 'codex-oauth':
       return (
         <CodexOAuthStep
           onSave={(profile, env) => finishProfileSave(onDone, profile, env)}
-          onBack={() => setStep({ name: 'choose' })}
+          onBack={() => setStep({ name: 'codex-auth-method' })}
           onCancel={() => onDone()}
         />
       )
